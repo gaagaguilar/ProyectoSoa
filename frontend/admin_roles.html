@@ -72,7 +72,13 @@
     .then(data => {
       const parser = new DOMParser();
       const xmlDoc = parser.parseFromString(data, "text/xml");
-      const returnText = xmlDoc.getElementsByTagName("return")[0].textContent;
+
+      const resultados = xmlDoc.getElementsByTagName("resultado");
+      if (resultados.length === 0) {
+        alert("No se encontró el nodo <resultado> en la respuesta del servidor.");
+        return;
+      }
+      const returnText = resultados[0].textContent;
 
       if (returnText.includes("Autenticado")) {
         userRol = returnText.split("Rol:")[1].trim();
@@ -163,7 +169,13 @@
 
     const xmlBody = `<cambiar_rol><token>${userToken}</token><correo>${correo}</correo><rol>${nuevoRol}</rol></cambiar_rol>`;
     const xmlDoc = await enviarPeticion(xmlBody);
-    alert(xmlDoc.getElementsByTagName("return")[0].textContent);
+
+    const resultados = xmlDoc.getElementsByTagName("resultado");
+    if (resultados.length > 0) {
+      alert(resultados[0].textContent);
+    } else {
+      alert("No se encontró el nodo <resultado> en la respuesta.");
+    }
     await listarUsuarios();
   }
 </script>
