@@ -174,13 +174,185 @@ def listar_tablas(base):
     except Exception as e:
         return f"Error listando tablas: {str(e)}"
 
+def consulta_avanzada(sql_query):
+    try:
+        if not sql_query.strip().lower().startswith("select"):
+            return "Solo se permiten consultas SELECT para operaciones avanzadas."
+
+        conn = mysql.connector.connect(**DB_CONFIG)
+        cursor = conn.cursor(dictionary=True)
+        cursor.execute(sql_query)
+        rows = cursor.fetchall()
+        cursor.close()
+        conn.close()
+
+        xml_resp = "<resultados>"
+        for row in rows:
+            xml_resp += "<registro>"
+            for key, val in row.items():
+                xml_resp += f"<{key}>{val}</{key}>"
+            xml_resp += "</registro>"
+        xml_resp += "</resultados>"
+        return xml_resp
+    except Exception as e:
+        return f"Error en consulta avanzada: {str(e)}"
+
+def construir_consulta_sql(xml_root):
+    try:
+        base = xml_root.findtext('base')
+        if not base:
+            raise ValueError("No se especificó la base de datos")
+
+        tablas_xml = xml_root.find('tablas')
+        campos_xml = xml_root.find('campos')
+        relaciones_xml = xml_root.find('relaciones')
+        filtros_xml = xml_root.find('filtros')
+        agrupaciones_xml = xml_root.find('agrupaciones')
+        ordenamientos_xml = xml_root.find('ordenamientos')
+        limite = xml_root.findtext('limite')
+
+        if tablas_xml is None or len(tablas_xml.findall('tabla')) == 0:
+            raise ValueError("Debe especificar al menos una tabla")
+
+        tablas = []
+        for t in tablas_xml.findall('tabla'):
+            nombre = t.attrib.get('nombre')
+            alias = t.attrib.get('alias')
+            if not nombre:
+                raise ValueError("Cada tabla debe tener atributo 'nombre'")
+            tablas.append((nombre, alias))
+
+        campos = []
+        if campos_xml is not None:
+            for c in campos_xml.findall('campo'):
+                tabla_campo = c.attrib.get('tabla')
+                nombre_campo = c.attrib.get('nombre')
+                if not tabla_campo or not nombre_campo:
+                    raise ValueError("Cada campo debe tener 'tabla' y 'nombre'")
+                funcion = c.attrib.get('funcion')
+                alias = c.attrib.get('alias')
+                if funcion:
+                    funcion = funcion.upper()
+                    if funcion not in ['SUM', 'COUNT', 'AVG', 'MIN', 'MAX']:
+                        raise ValueError(f"Función agregada no permitida: {funcion}")
+                campos.append({'tabla': tabla_campo, 'nombre': nombre_campo, 'funcion': funcion, 'alias': alias})
+
+        relaciones = []
+        if relaciones_xml is not None:
+            for r in relaciones_xml.findall('relacion'):
+                tabla1 = r.attrib.get('tabla1')
+                campo1 = r.attrib.get('campo1')
+                tabla2 = r.attrib.get('tabla2')
+                campo2 = r.attrib.get('campo2')
+                tipo = r.attrib.get('tipo', 'INNER').upper()
+                if not all([tabla1, campo1, tabla2, campo2]):
+                    raise ValueError("Relación incompleta (falta tabla o campo)")
+                if tipo not in ['INNER', 'LEFT', 'RIGHT']:
+                    raise ValueError(f"Tipo de JOIN inválido: {tipo}")
+                relaciones.append({'tabla1': tabla1, 'campo1': campo1, 'tabla2': tabla2, 'campo2': campo2, 'tipo': tipo})
+
+        filtros = []
+        if filtros_xml is not None:
+            operadores_validos = ['=', '<>', '!=', '<', '>', '<=', '>=']
+            for f in filtros_xml.findall('filtro'):
+                tabla_f = f.attrib.get('tabla')
+                campo_f = f.attrib.get('campo')
+                operador = f.attrib.get('operador')
+                valor = f.attrib.get('valor')
+                if operador not in operadores_validos:
+                    raise ValueError(f"Operador inválido en filtro: {operador}")
+                filtros.append({'tabla': tabla_f, 'campo': campo_f, 'operador': operador, 'valor': valor})
+
+        agrupaciones = []
+        if agrupaciones_xml is not None:
+            for a in agrupaciones_xml.findall('campo'):
+                tabla_a = a.attrib.get('tabla')
+                nombre_a = a.attrib.get('nombre')
+                if tabla_a and nombre_a:
+                    agrupaciones.append(f"{tabla_a}.{nombre_a}")
+
+        ordenamientos = []
+        if ordenamientos_xml is not None:
+            for o in ordenamientos_xml.findall('orden'):
+                campo_o = o.attrib.get('campo')
+                direccion = o.attrib.get('direccion', 'ASC').upper()
+                if direccion not in ['ASC', 'DESC']:
+                    raise ValueError(f"Dirección de orden inválida: {direccion}")
+                ordenamientos.append((campo_o, direccion))
+
+        limit_clause = ""
+        if limite:
+            try:
+                lim_val = int(limite)
+                if lim_val <= 0:
+                    raise ValueError()
+                limit_clause = f"LIMIT {lim_val}"
+            except:
+                raise ValueError("El límite debe ser un entero positivo")
+
+        # Construir SELECT
+        select_parts = []
+        for c in campos:
+            part = ""
+            if c['funcion']:
+                part += f"{c['funcion']}({c['tabla']}.{c['nombre']})"
+            else:
+                part += f"{c['tabla']}.{c['nombre']}"
+            if c['alias']:
+                part += f" AS {c['alias']}"
+            select_parts.append(part)
+        select_clause = ", ".join(select_parts) if select_parts else "*"
+
+        # Construir FROM con JOINs
+        principal = tablas[0]
+        from_clause = f"FROM {principal[0]} {principal[1] if principal[1] else ''}".strip()
+        for rel in relaciones:
+            from_clause += f" {rel['tipo']} JOIN {rel['tabla2']} ON {rel['tabla1']}.{rel['campo1']} = {rel['tabla2']}.{rel['campo2']}"
+
+        # Construir WHERE
+        where_clause = ""
+        if filtros:
+            condiciones = []
+            for f in filtros:
+                val = f["valor"].replace("'", "''")
+                condiciones.append(f"{f['tabla']}.{f['campo']} {f['operador']} '{val}'")
+            where_clause = "WHERE " + " AND ".join(condiciones)
+
+        # Construir GROUP BY
+        group_by_clause = ""
+        if agrupaciones:
+            group_by_clause = "GROUP BY " + ", ".join(agrupaciones)
+
+        # Construir ORDER BY
+        order_by_clause = ""
+        if ordenamientos:
+            order_by_clause = "ORDER BY " + ", ".join([f"{o[0]} {o[1]}" for o in ordenamientos])
+
+        consulta = f"SELECT {select_clause} {from_clause} {where_clause} {group_by_clause} {order_by_clause} {limit_clause}"
+        print(f"[SQL] Consulta generada:\n{consulta}\n")
+
+        return consulta.strip()
+
+    except Exception as e:
+        raise ValueError(f"Error construyendo consulta SQL: {str(e)}")
+
 def callback(ch, method, properties, body):
     mensaje_recibido = body.decode()
     print(f"[SQL] Mensaje recibido:\n{mensaje_recibido}\n")
 
     try:
-        xml_root = etree.fromstring(body)
-        operacion = xml_root.tag
+        xml_tree = etree.fromstring(body)
+        body_elem = xml_tree.xpath('//soap:Body', namespaces={'soap': 'http://schemas.xmlsoap.org/soap/envelope/'})
+        if body_elem and len(body_elem[0]) > 0:
+            operacion_elem = body_elem[0][0]
+            operacion = operacion_elem.tag
+            if '}' in operacion:
+                operacion = operacion.split('}', 1)[1]
+            operacion = operacion.lower()
+            xml_root = operacion_elem
+        else:
+            operacion = xml_tree.tag.lower()
+            xml_root = xml_tree
 
         if operacion == "crear_base":
             nombre = xml_root.findtext("nombre")
@@ -262,6 +434,13 @@ def callback(ch, method, properties, body):
         elif operacion == "listar_tablas":
             base = xml_root.findtext("base")
             resultado = listar_tablas(base)
+
+        elif operacion == "consulta_avanzada":
+            try:
+                consulta_sql = construir_consulta_sql(xml_root)
+                resultado = consulta_avanzada(consulta_sql)
+            except Exception as e:
+                resultado = f"Error en consulta avanzada: {str(e)}"
 
         else:
             resultado = f"Operación '{operacion}' no soportada por SQL."

@@ -1,0 +1,541 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <title>Consulta Avanzada Dinámica con Google Login</title>
+  <script src="https://accounts.google.com/gsi/client" async defer></script>
+  <style>
+    body { font-family: Arial, sans-serif; max-width: 900px; margin: auto; padding: 20px; }
+    label { display: block; margin: 8px 0 4px; font-weight: bold; }
+    select, input[type=text], input[type=number] { width: 100%; max-width: 400px; padding: 5px; margin-bottom: 10px; }
+    button { padding: 8px 12px; cursor: pointer; margin-top: 10px; }
+    .campo-item, .filtro-item, .agrupacion-item, .orden-item { margin-bottom: 8px; border-bottom: 1px solid #ccc; padding-bottom: 6px; }
+    .flex-row { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+    .flex-row > * { flex: 1; min-width: 120px; }
+    .hidden { display: none; }
+    #xmlGenerado, #respuesta { background: #f4f4f4; border: 1px solid #ccc; padding: 10px; white-space: pre-wrap; max-height: 300px; overflow-y: auto; margin-top: 10px; }
+  </style>
+</head>
+<body>
+
+<h1>Consulta Avanzada Dinámica con Google Login</h1>
+
+<div id="g_id_onload"
+     data-client_id="1047544597889-tqmj3t57fka16ms7fcjgcii8mseu0cc3.apps.googleusercontent.com"
+     data-callback="handleCredentialResponse"
+     data-auto_prompt="false">
+</div>
+
+<div class="g_id_signin"
+     data-type="standard"
+     data-size="large"
+     data-theme="outline"
+     data-text="sign_in_with"
+     data-shape="rectangular"
+     data-logo_alignment="left">
+</div>
+
+<div id="userInfo" class="hidden">
+  <p><strong>Usuario autenticado</strong></p>
+  <label for="interfazSelect">Interfaz (SQL / NoSQL):</label>
+  <select id="interfazSelect">
+    <option value="sql">SQL</option>
+    <option value="nosql">NoSQL</option>
+  </select>
+
+  <label for="baseSelect">Base de datos:</label>
+  <select id="baseSelect" disabled>
+    <option value="">-- Seleccione base --</option>
+  </select>
+
+  <label for="tablaPrincipalSelect">Tabla principal:</label>
+  <select id="tablaPrincipalSelect" disabled>
+    <option value="">-- Seleccione tabla principal --</option>
+  </select>
+
+  <label for="aliasPrincipalInput">Alias tabla principal:</label>
+  <input type="text" id="aliasPrincipalInput" placeholder="Ej: u" />
+
+  <label for="tablaSecundariaSelect">Tabla secundaria (opcional):</label>
+  <select id="tablaSecundariaSelect" disabled>
+    <option value="">-- Ninguna --</option>
+  </select>
+
+  <label for="aliasSecundariaInput">Alias tabla secundaria:</label>
+  <input type="text" id="aliasSecundariaInput" placeholder="Ej: o" />
+
+  <fieldset style="margin-top:20px; padding:10px; border:1px solid #ccc;">
+    <legend><strong>Campos a mostrar</strong></legend>
+    <div id="camposContainer"></div>
+  </fieldset>
+
+  <fieldset style="margin-top:20px; padding:10px; border:1px solid #ccc;">
+    <legend><strong>Relación (JOIN)</strong></legend>
+    <label for="joinCampoPrincipal">Campo tabla principal:</label>
+    <input type="text" id="joinCampoPrincipal" placeholder="Ej: u.id" />
+    <label for="joinCampoSecundaria">Campo tabla secundaria:</label>
+    <input type="text" id="joinCampoSecundaria" placeholder="Ej: o.usuario_id" />
+    <label for="tipoJoinSelect">Tipo de JOIN:</label>
+    <select id="tipoJoinSelect">
+      <option value="inner">INNER</option>
+      <option value="left">LEFT</option>
+      <option value="right">RIGHT</option>
+    </select>
+  </fieldset>
+
+  <fieldset style="margin-top:20px; padding:10px; border:1px solid #ccc;">
+    <legend><strong>Filtros (WHERE)</strong></legend>
+    <div id="filtrosContainer"></div>
+    <button type="button" onclick="agregarFiltro()">Agregar filtro</button>
+  </fieldset>
+
+  <fieldset style="margin-top:20px; padding:10px; border:1px solid #ccc;">
+    <legend><strong>Agrupaciones (GROUP BY)</strong></legend>
+    <div id="agrupacionesContainer"></div>
+    <button type="button" onclick="agregarAgrupacion()">Agregar agrupación</button>
+  </fieldset>
+
+  <fieldset style="margin-top:20px; padding:10px; border:1px solid #ccc;">
+    <legend><strong>Ordenamientos (ORDER BY)</strong></legend>
+    <div id="ordenamientosContainer"></div>
+    <button type="button" onclick="agregarOrdenamiento()">Agregar ordenamiento</button>
+  </fieldset>
+
+  <label for="limiteInput" style="margin-top:20px;">Límite de resultados:</label>
+  <input type="number" id="limiteInput" min="1" value="10" />
+
+  <button onclick="generarYEnviar()">Generar y Enviar Consulta</button>
+
+  <h3>XML generado</h3>
+  <pre id="xmlGenerado"></pre>
+
+  <h3>Respuesta</h3>
+  <pre id="respuesta"></pre>
+</div>
+
+<script>
+  let currentToken = null;
+  let camposDisponibles = [];
+
+  function handleCredentialResponse(response) {
+    currentToken = response.credential;
+    document.getElementById('userInfo').classList.remove('hidden');
+    cargarBases();
+  }
+
+  async function cargarBases() {
+    const interfaz = document.getElementById('interfazSelect').value;
+    const baseSelect = document.getElementById('baseSelect');
+    baseSelect.innerHTML = '<option value="">Cargando...</option>';
+    baseSelect.disabled = true;
+
+    const xmlBody = `<listar_bases><token>${escapeXML(currentToken)}</token><interfaz>${interfaz}</interfaz></listar_bases>`;
+    try {
+      const xmlResp = await enviarPeticion(xmlBody);
+      const bases = xmlResp.getElementsByTagName('base');
+      baseSelect.innerHTML = '<option value="">-- Seleccione base --</option>';
+      for(let b of bases) {
+        const opt = document.createElement('option');
+        opt.value = b.textContent;
+        opt.textContent = b.textContent;
+        baseSelect.appendChild(opt);
+      }
+      baseSelect.disabled = false;
+      document.getElementById('tablaPrincipalSelect').innerHTML = '<option value="">-- Seleccione tabla principal --</option>';
+      document.getElementById('tablaPrincipalSelect').disabled = true;
+      document.getElementById('tablaSecundariaSelect').innerHTML = '<option value="">-- Ninguna --</option>';
+      document.getElementById('tablaSecundariaSelect').disabled = true;
+      limpiarCampos();
+    } catch(e) {
+      alert('Error al cargar bases: ' + e);
+      baseSelect.innerHTML = '<option value="">-- Error cargando bases --</option>';
+    }
+  }
+
+  async function cargarTablas(selectId) {
+    const interfaz = document.getElementById('interfazSelect').value;
+    const base = document.getElementById('baseSelect').value;
+    const select = document.getElementById(selectId);
+    if(!base) {
+      select.innerHTML = selectId==='tablaSecundariaSelect'? '<option value="">-- Ninguna --</option>' : '<option value="">-- Seleccione tabla --</option>';
+      select.disabled = true;
+      limpiarCampos();
+      return;
+    }
+    select.innerHTML = '<option value="">Cargando...</option>';
+    select.disabled = true;
+
+    const xmlBody = `<listar_tablas><token>${escapeXML(currentToken)}</token><interfaz>${interfaz}</interfaz><base>${escapeXML(base)}</base></listar_tablas>`;
+    try {
+      const xmlResp = await enviarPeticion(xmlBody);
+      const tablas = xmlResp.getElementsByTagName('tabla');
+      select.innerHTML = selectId==='tablaSecundariaSelect'? '<option value="">-- Ninguna --</option>' : '<option value="">-- Seleccione tabla --</option>';
+      for(let t of tablas) {
+        const opt = document.createElement('option');
+        opt.value = t.textContent;
+        opt.textContent = t.textContent;
+        select.appendChild(opt);
+      }
+      select.disabled = false;
+      if(selectId === 'tablaPrincipalSelect') {
+        document.getElementById('tablaSecundariaSelect').innerHTML = '<option value="">-- Ninguna --</option>';
+        document.getElementById('tablaSecundariaSelect').disabled = false;
+        limpiarCampos();
+      }
+    } catch(e) {
+      alert('Error al cargar tablas: ' + e);
+      select.innerHTML = selectId==='tablaSecundariaSelect'? '<option value="">-- Ninguna --</option>' : '<option value="">-- Error cargando tablas --</option>';
+    }
+  }
+
+  async function cargarCampos() {
+    // Limpia campos y los vuelve a cargar según tabla principal y secundaria seleccionadas
+    camposDisponibles = [];
+    const base = document.getElementById('baseSelect').value;
+    const interfaz = document.getElementById('interfazSelect').value;
+    if(!base) return;
+    const tablas = [];
+    const t1 = document.getElementById('tablaPrincipalSelect').value;
+    if(t1) tablas.push(t1);
+    const t2 = document.getElementById('tablaSecundariaSelect').value;
+    if(t2 && t2 !== '') tablas.push(t2);
+
+    if(tablas.length === 0) return;
+
+    // Aquí asumimos que el microservicio (SQL o NoSQL) tiene una operación para listar campos, pero como no existe en código actual,
+    // se puede usar workaround: consulta el esquema de la tabla directamente (para SQL se puede usar DESCRIBE tabla)
+    // Para demo, vamos a simular campos, o usar tablas fijas. Idealmente deberías implementar en el backend esta operación.
+
+    // Simulación campos para demo (reemplazar por llamada real)
+    camposDisponibles = [];
+
+    // Por simplicidad demo, llamamos la función por cada tabla para SQL/NoSQL (no implementada en backend, debes agregar)
+    // Aquí se deja como ejemplo:
+
+    // Limpia contenedor
+    const cont = document.getElementById('camposContainer');
+    cont.innerHTML = '';
+
+    // Ejemplo campos fijos, en práctica reemplaza con consulta backend para cada tabla
+    tablas.forEach(tabla => {
+      // Simulamos algunos campos
+      // Para SQL: traer tipo y nombre de campos
+      camposDisponibles.push(...[
+        {tabla: tabla, nombre: 'id'},
+        {tabla: tabla, nombre: 'nombre'},
+        {tabla: tabla, nombre: 'edad'},
+        {tabla: tabla, nombre: 'activo'},
+        {tabla: tabla, nombre: 'monto'}
+      ]);
+    });
+
+    // Agrupa campos por tabla
+    const camposPorTabla = {};
+    camposDisponibles.forEach(c => {
+      if(!camposPorTabla[c.tabla]) camposPorTabla[c.tabla] = [];
+      camposPorTabla[c.tabla].push(c.nombre);
+    });
+
+    for(let tabla in camposPorTabla) {
+      const div = document.createElement('div');
+      div.innerHTML = `<strong>Tabla ${tabla}</strong>`;
+      camposPorTabla[tabla].forEach(nombreCampo => {
+        const idCampo = `campo_${tabla}_${nombreCampo}`;
+        const wrapper = document.createElement('div');
+        wrapper.className = 'campo-item';
+        wrapper.innerHTML = `
+          <label>
+            <input type="checkbox" id="${idCampo}" data-tabla="${tabla}" data-nombre="${nombreCampo}" />
+            ${nombreCampo}
+          </label>
+          <select id="funcion_${idCampo}" disabled>
+            <option value="">(Ninguna)</option>
+            <option value="SUM">SUM</option>
+            <option value="COUNT">COUNT</option>
+            <option value="AVG">AVG</option>
+            <option value="MIN">MIN</option>
+            <option value="MAX">MAX</option>
+          </select>
+          <input type="text" placeholder="Alias (opcional)" id="alias_${idCampo}" disabled />
+        `;
+        cont.appendChild(wrapper);
+
+        // Activar selects solo si el checkbox está seleccionado
+        const checkbox = wrapper.querySelector('input[type=checkbox]');
+        const selectFuncion = wrapper.querySelector('select');
+        const inputAlias = wrapper.querySelector('input[type=text]');
+        checkbox.addEventListener('change', () => {
+          selectFuncion.disabled = !checkbox.checked;
+          inputAlias.disabled = !checkbox.checked;
+        });
+      });
+    }
+  }
+
+  function agregarFiltro() {
+    const cont = document.getElementById('filtrosContainer');
+    const idx = cont.children.length;
+    const div = document.createElement('div');
+    div.className = 'filtro-item flex-row';
+    div.innerHTML = `
+      <select class="filtro-tabla"></select>
+      <select class="filtro-campo"></select>
+      <select class="filtro-operador">
+        <option value="=">=</option>
+        <option value="<>"><></option>
+        <option value="!=">!=</option>
+        <option value="<"><</option>
+        <option value=">">></option>
+        <option value="<="><=</option>
+        <option value=">=">>=</option>
+      </select>
+      <input type="text" class="filtro-valor" placeholder="Valor" />
+      <button type="button" onclick="this.parentNode.remove()">X</button>
+    `;
+    cont.appendChild(div);
+    actualizarFiltrosSelects();
+  }
+
+  function agregarAgrupacion() {
+    const cont = document.getElementById('agrupacionesContainer');
+    const idx = cont.children.length;
+    const div = document.createElement('div');
+    div.className = 'agrupacion-item flex-row';
+    div.innerHTML = `
+      <select class="agrupacion-tabla"></select>
+      <select class="agrupacion-campo"></select>
+      <button type="button" onclick="this.parentNode.remove()">X</button>
+    `;
+    cont.appendChild(div);
+    actualizarAgrupacionesSelects();
+  }
+
+  function agregarOrdenamiento() {
+    const cont = document.getElementById('ordenamientosContainer');
+    const idx = cont.children.length;
+    const div = document.createElement('div');
+    div.className = 'orden-item flex-row';
+    div.innerHTML = `
+      <select class="orden-tabla"></select>
+      <select class="orden-campo"></select>
+      <select class="orden-direccion">
+        <option value="ASC">ASC</option>
+        <option value="DESC">DESC</option>
+      </select>
+      <button type="button" onclick="this.parentNode.remove()">X</button>
+    `;
+    cont.appendChild(div);
+    actualizarOrdenamientosSelects();
+  }
+
+  function actualizarFiltrosSelects() {
+    const tablas = getTablasSeleccionadas();
+    document.querySelectorAll('.filtro-tabla').forEach(s => {
+      s.innerHTML = '';
+      tablas.forEach(t => {
+        const opt = document.createElement('option');
+        opt.value = t;
+        opt.textContent = t;
+        s.appendChild(opt);
+      });
+      s.onchange = () => actualizarCamposSelect(s.nextElementSibling, s.value);
+      actualizarCamposSelect(s.nextElementSibling, s.value);
+    });
+  }
+  function actualizarAgrupacionesSelects() {
+    const tablas = getTablasSeleccionadas();
+    document.querySelectorAll('.agrupacion-tabla').forEach(s => {
+      s.innerHTML = '';
+      tablas.forEach(t => {
+        const opt = document.createElement('option');
+        opt.value = t;
+        opt.textContent = t;
+        s.appendChild(opt);
+      });
+      s.onchange = () => actualizarCamposSelect(s.nextElementSibling, s.value);
+      actualizarCamposSelect(s.nextElementSibling, s.value);
+    });
+  }
+  function actualizarOrdenamientosSelects() {
+    const tablas = getTablasSeleccionadas();
+    document.querySelectorAll('.orden-tabla').forEach(s => {
+      s.innerHTML = '';
+      tablas.forEach(t => {
+        const opt = document.createElement('option');
+        opt.value = t;
+        opt.textContent = t;
+        s.appendChild(opt);
+      });
+      s.onchange = () => actualizarCamposSelect(s.nextElementSibling, s.value);
+      actualizarCamposSelect(s.nextElementSibling, s.value);
+    });
+  }
+
+  function actualizarCamposSelect(selectElem, tabla) {
+    selectElem.innerHTML = '';
+    if(!tabla) return;
+    const campos = camposDisponibles.filter(c => c.tabla === tabla).map(c => c.nombre);
+    campos.forEach(campo => {
+      const opt = document.createElement('option');
+      opt.value = campo;
+      opt.textContent = campo;
+      selectElem.appendChild(opt);
+    });
+  }
+
+  function getTablasSeleccionadas() {
+    const t1 = document.getElementById('tablaPrincipalSelect').value;
+    const t2 = document.getElementById('tablaSecundariaSelect').value;
+    const tablas = [];
+    if(t1) tablas.push(t1);
+    if(t2) tablas.push(t2);
+    return tablas;
+  }
+
+  function escapeXML(str) {
+    if(!str) return '';
+    return str.replace(/[<>&'"]/g, function (c) {
+      return {'<':'&lt;', '>':'&gt;', '&':'&amp;', '\'':'&apos;', '"':'&quot;'}[c];
+    });
+  }
+
+  async function enviarPeticion(xmlBody) {
+    const soapBody = `<?xml version="1.0" encoding="UTF-8"?>
+      <soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/">
+        <soapenv:Body>
+          ${xmlBody}
+        </soapenv:Body>
+      </soapenv:Envelope>`;
+
+    const res = await fetch('http://localhost:9000/', {
+      method: 'POST',
+      headers: {'Content-Type': 'text/xml'},
+      body: soapBody
+    });
+    if (!res.ok) throw new Error('Error HTTP: ' + res.status);
+    const text = await res.text();
+    const parser = new DOMParser();
+    return parser.parseFromString(text, "text/xml");
+  }
+
+  function generarYEnviar() {
+    const interfaz = document.getElementById('interfazSelect').value;
+    const base = document.getElementById('baseSelect').value;
+    if(!base) return alert('Selecciona una base de datos');
+    const tablaPrincipal = document.getElementById('tablaPrincipalSelect').value;
+    if(!tablaPrincipal) return alert('Selecciona una tabla principal');
+    const aliasPrincipal = document.getElementById('aliasPrincipalInput').value.trim() || tablaPrincipal[0].toLowerCase();
+    const tablaSecundaria = document.getElementById('tablaSecundariaSelect').value;
+    const aliasSecundaria = document.getElementById('aliasSecundariaInput').value.trim() || (tablaSecundaria? tablaSecundaria[0].toLowerCase() : '');
+    const limite = document.getElementById('limiteInput').value.trim() || '10';
+
+    // Campos seleccionados
+    const campos = [];
+    document.querySelectorAll('#camposContainer input[type=checkbox]').forEach(chk => {
+      if(chk.checked) {
+        const tabla = chk.dataset.tabla;
+        const nombre = chk.dataset.nombre;
+        const id = `campo_${tabla}_${nombre}`;
+        const funcion = document.getElementById(`funcion_${id}`).value;
+        const alias = document.getElementById(`alias_${id}`).value.trim();
+        campos.push({tabla, nombre, funcion, alias});
+      }
+    });
+    if(campos.length === 0) return alert('Selecciona al menos un campo a mostrar');
+
+    // Construir XML campos
+    let camposXML = '';
+    campos.forEach(c => {
+      camposXML += `<campo tabla="${escapeXML(c.tabla)}" nombre="${escapeXML(c.nombre)}"${c.funcion? ` funcion="${escapeXML(c.funcion)}"`: ''}${c.alias? ` alias="${escapeXML(c.alias)}"`: ''} />`;
+    });
+
+    // Relacion (solo si hay tabla secundaria)
+    let relacionXML = '';
+    if(tablaSecundaria && document.getElementById('joinCampoPrincipal').value && document.getElementById('joinCampoSecundaria').value) {
+      relacionXML = `<relacion tabla1="${escapeXML(aliasPrincipal)}" campo1="${escapeXML(document.getElementById('joinCampoPrincipal').value.split('.').pop())}" tabla2="${escapeXML(aliasSecundaria)}" campo2="${escapeXML(document.getElementById('joinCampoSecundaria').value.split('.').pop())}" tipo="${escapeXML(document.getElementById('tipoJoinSelect').value)}" />`;
+    }
+
+    // Filtros
+    let filtrosXML = '';
+    document.querySelectorAll('#filtrosContainer .filtro-item').forEach(div => {
+      const tabla = div.querySelector('.filtro-tabla').value;
+      const campo = div.querySelector('.filtro-campo').value;
+      const operador = div.querySelector('.filtro-operador').value;
+      const valor = div.querySelector('.filtro-valor').value.trim();
+      if(tabla && campo && operador && valor)
+        filtrosXML += `<filtro tabla="${escapeXML(tabla)}" campo="${escapeXML(campo)}" operador="${escapeXML(operador)}" valor="${escapeXML(valor)}" />`;
+    });
+
+    // Agrupaciones
+    let agrupacionesXML = '';
+    document.querySelectorAll('#agrupacionesContainer .agrupacion-item').forEach(div => {
+      const tabla = div.querySelector('.agrupacion-tabla').value;
+      const campo = div.querySelector('.agrupacion-campo').value;
+      if(tabla && campo)
+        agrupacionesXML += `<campo tabla="${escapeXML(tabla)}" nombre="${escapeXML(campo)}" />`;
+    });
+
+    // Ordenamientos
+    let ordenamientosXML = '';
+    document.querySelectorAll('#ordenamientosContainer .orden-item').forEach(div => {
+      const tabla = div.querySelector('.orden-tabla').value;
+      const campo = div.querySelector('.orden-campo').value;
+      const direccion = div.querySelector('.orden-direccion').value;
+      if(tabla && campo && direccion)
+        ordenamientosXML += `<orden campo="${escapeXML(campo)}" direccion="${escapeXML(direccion)}" />`;
+    });
+
+    const xmlConsulta = `
+      <consulta_avanzada>
+        <token>${escapeXML(currentToken)}</token>
+        <interfaz>${escapeXML(interfaz)}</interfaz>
+        <base>${escapeXML(base)}</base>
+        <tablas>
+          <tabla nombre="${escapeXML(tablaPrincipal)}" alias="${escapeXML(aliasPrincipal)}" />
+          ${tablaSecundaria? `<tabla nombre="${escapeXML(tablaSecundaria)}" alias="${escapeXML(aliasSecundaria)}" />`: ''}
+        </tablas>
+        <campos>${camposXML}</campos>
+        <relaciones>${relacionXML}</relaciones>
+        <filtros>${filtrosXML}</filtros>
+        <agrupaciones>${agrupacionesXML}</agrupaciones>
+        <ordenamientos>${ordenamientosXML}</ordenamientos>
+        <limite>${escapeXML(limite)}</limite>
+      </consulta_avanzada>`;
+
+    document.getElementById('xmlGenerado').textContent = `<?xml version="1.0" encoding="UTF-8"?>\n<soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/">\n  <soapenv:Body>\n${xmlConsulta}\n  </soapenv:Body>\n</soapenv:Envelope>`;
+
+    enviarPeticion(xmlConsulta)
+      .then(respXML => {
+        const ret = respXML.getElementsByTagName('return')[0];
+        document.getElementById('respuesta').textContent = ret ? ret.textContent : 'Respuesta inválida';
+      })
+      .catch(e => {
+        document.getElementById('respuesta').textContent = 'Error enviando consulta: ' + e;
+      });
+  }
+
+  // Actualizaciones reactivas
+  document.getElementById('interfazSelect').addEventListener('change', () => {
+    cargarBases();
+    limpiarCampos();
+  });
+  document.getElementById('baseSelect').addEventListener('change', () => {
+    cargarTablas('tablaPrincipalSelect');
+  });
+  document.getElementById('tablaPrincipalSelect').addEventListener('change', () => {
+    cargarCampos();
+  });
+  document.getElementById('tablaSecundariaSelect').addEventListener('change', () => {
+    cargarCampos();
+  });
+
+  function limpiarCampos() {
+    document.getElementById('camposContainer').innerHTML = '';
+    document.getElementById('filtrosContainer').innerHTML = '';
+    document.getElementById('agrupacionesContainer').innerHTML = '';
+    document.getElementById('ordenamientosContainer').innerHTML = '';
+  }
+</script>
+
+</body>
+</html>

@@ -1,6 +1,7 @@
 import pika
 from pymongo import MongoClient
 from lxml import etree
+import json
 
 MONGO_URI = "mongodb://localhost:27017"
 client = MongoClient(MONGO_URI)
@@ -113,13 +114,123 @@ def parsear_campos(campos_xml):
         resultado[nombre] = valor
     return resultado
 
+def construir_pipeline_mongo(xml_root):
+    try:
+        pipeline = []
+
+        filtros_xml = xml_root.find('filtros')
+        relaciones_xml = xml_root.find('relaciones')
+        campos_xml = xml_root.find('campos')
+        agrupaciones_xml = xml_root.find('agrupaciones')
+        ordenamientos_xml = xml_root.find('ordenamientos')
+        limite = xml_root.findtext('limite')
+
+        if filtros_xml is not None:
+            match = {}
+            operadores_validos = ['=', '<>', '!=', '<', '>', '<=', '>=']
+            for f in filtros_xml.findall('filtro'):
+                operador = f.attrib.get('operador', '=')
+                if operador not in operadores_validos:
+                    raise ValueError(f"Operador inválido en filtro NoSQL: {operador}")
+                campo = f"{f.attrib['tabla']}.{f.attrib['campo']}"
+                valor = f.attrib['valor']
+                # Solo filtro igualdad para demo
+                if operador in ['=', '==']:
+                    match[campo] = valor
+                else:
+                    raise ValueError(f"Operador NoSQL no implementado: {operador}")
+            if match:
+                pipeline.append({'$match': match})
+
+        if relaciones_xml is not None:
+            for r in relaciones_xml.findall('relacion'):
+                local_field = f"{r.attrib['tabla1']}.{r.attrib['campo1']}"
+                foreign_field = r.attrib['campo2']
+                from_collection = r.attrib['tabla2']
+                pipeline.append({
+                    '$lookup': {
+                        'from': from_collection,
+                        'localField': local_field,
+                        'foreignField': foreign_field,
+                        'as': from_collection
+                    }
+                })
+
+        project = {}
+        if campos_xml is not None:
+            for c in campos_xml.findall('campo'):
+                alias = c.attrib.get('alias', c.attrib['nombre'])
+                campo_full = f"{c.attrib['tabla']}.{c.attrib['nombre']}"
+                project[alias] = f"${campo_full}"
+        if project:
+            pipeline.append({'$project': project})
+
+        if agrupaciones_xml is not None:
+            group_id = {}
+            for a in agrupaciones_xml.findall('campo'):
+                group_id[a.attrib['nombre']] = f"${a.attrib['tabla']}.{a.attrib['nombre']}"
+            if group_id:
+                pipeline.append({'$group': {'_id': group_id}})
+
+        if ordenamientos_xml is not None:
+            sort_stage = {}
+            for o in ordenamientos_xml.findall('orden'):
+                direccion = 1 if o.attrib['direccion'].upper() == 'ASC' else -1
+                sort_stage[o.attrib['campo']] = direccion
+            if sort_stage:
+                pipeline.append({'$sort': sort_stage})
+
+        if limite:
+            try:
+                lim_val = int(limite)
+                if lim_val <= 0:
+                    raise ValueError()
+                pipeline.append({'$limit': lim_val})
+            except:
+                raise ValueError("El límite debe ser un entero positivo")
+
+        print(f"[NoSQL] Pipeline generado:\n{json.dumps(pipeline, indent=2)}\n")
+
+        return pipeline
+    except Exception as e:
+        raise ValueError(f"Error construyendo pipeline MongoDB: {str(e)}")
+
+def consulta_avanzada(base, tabla, pipeline_json):
+    try:
+        db = client[base]
+        coleccion = db[tabla]
+        pipeline = json.loads(pipeline_json)
+        resultados = coleccion.aggregate(pipeline)
+        xml_resp = "<resultados>"
+        for doc in resultados:
+            xml_resp += "<registro>"
+            for k, v in doc.items():
+                if k == "_id":
+                    continue
+                xml_resp += f"<{k}>{v}</{k}>"
+            xml_resp += "</registro>"
+        xml_resp += "</resultados>"
+        return xml_resp
+    except Exception as e:
+        return f"Error en consulta avanzada NoSQL: {str(e)}"
+
 def callback(ch, method, properties, body):
     mensaje_recibido = body.decode()
     print(f"[NoSQL] Mensaje recibido:\n{mensaje_recibido}\n")
 
     try:
-        xml_root = etree.fromstring(body)
-        operacion = xml_root.tag
+        xml_tree = etree.fromstring(body)
+        body_elem = xml_tree.xpath('//soap:Body', namespaces={'soap': 'http://schemas.xmlsoap.org/soap/envelope/'})
+        if body_elem and len(body_elem[0]) > 0:
+            operacion_elem = body_elem[0][0]
+            operacion = operacion_elem.tag
+            if '}' in operacion:
+                operacion = operacion.split('}', 1)[1]
+            operacion = operacion.lower()
+            xml_root = operacion_elem
+        else:
+            operacion = xml_tree.tag.lower()
+            xml_root = xml_tree
 
         if operacion == "crear_base":
             nombre = xml_root.findtext("nombre")
@@ -184,6 +295,20 @@ def callback(ch, method, properties, body):
         elif operacion == "listar_tablas":
             base = xml_root.findtext("base")
             resultado = listar_tablas(base)
+
+        elif operacion == "consulta_avanzada":
+            base = xml_root.findtext('base')
+            tabla = None
+            tablas_xml = xml_root.find('tablas')
+            if tablas_xml is not None:
+                tabla_tag = tablas_xml.find('tabla')
+                if tabla_tag is not None:
+                    tabla = tabla_tag.attrib.get('nombre')
+            if not base or not tabla:
+                resultado = "Error: Debe especificar base y tabla para consulta avanzada NoSQL"
+            else:
+                pipeline = construir_pipeline_mongo(xml_root)
+                resultado = consulta_avanzada(base, tabla, json.dumps(pipeline))
 
         else:
             resultado = f"Operación '{operacion}' no soportada por NoSQL."
