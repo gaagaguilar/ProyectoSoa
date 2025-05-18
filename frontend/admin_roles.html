@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <title>Administración de Usuarios</title>
+  <script src="https://accounts.google.com/gsi/client" async defer></script>
+  <style>
+    table { border-collapse: collapse; width: 100%; max-width: 700px; margin: auto; }
+    th, td { border: 1px solid #ccc; padding: 8px; text-align: left; }
+    th { background: #eee; }
+    select { width: 100px; }
+    button { margin-top: 10px; padding: 5px 10px; }
+    #login-section, #user-section { max-width: 700px; margin: auto; }
+  </style>
+</head>
+<body>
+
+  <h2 style="text-align:center;">Administrar Usuarios y Roles</h2>
+
+  <div id="login-section">
+    <div id="g_id_onload"
+         data-client_id="1047544597889-tqmj3t57fka16ms7fcjgcii8mseu0cc3.apps.googleusercontent.com"
+         data-callback="handleCredentialResponse"
+         data-auto_prompt="false">
+    </div>
+
+    <div class="g_id_signin"
+         data-type="standard"
+         data-size="large"
+         data-theme="outline"
+         data-text="sign_in_with"
+         data-shape="rectangular"
+         data-logo_alignment="left">
+    </div>
+  </div>
+
+  <div id="user-section" style="display:none;">
+    <p>Bienvenido, <span id="user-email"></span> | Rol: <span id="user-rol"></span></p>
+    <table id="usuariosTable">
+      <thead>
+        <tr><th>Correo</th><th>Nombre</th><th>Rol</th><th>Acción</th></tr>
+      </thead>
+      <tbody></tbody>
+    </table>
+  </div>
+
+<script>
+  const ROLES = ["admin", "editor", "lector"];
+  let userToken = "";
+  let userRol = "";
+  let userEmail = "";
+
+  function handleCredentialResponse(response) {
+    userToken = response.credential;
+
+    // Validar token con orquestador para obtener rol y email
+    const soapBody = `<?xml version="1.0" encoding="UTF-8"?>
+<soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/">
+  <soapenv:Body>
+    <validar_token>
+      <token>${userToken}</token>
+    </validar_token>
+  </soapenv:Body>
+</soapenv:Envelope>`;
+
+    fetch('http://localhost:9000', {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/xml' },
+      body: soapBody
+    })
+    .then(res => res.text())
+    .then(data => {
+      const parser = new DOMParser();
+      const xmlDoc = parser.parseFromString(data, "text/xml");
+      const returnText = xmlDoc.getElementsByTagName("return")[0].textContent;
+
+      if (returnText.includes("Autenticado")) {
+        userRol = returnText.split("Rol:")[1].trim();
+        userEmail = extractEmailFromToken(userToken); // función para extraer email del token
+        document.getElementById("user-rol").textContent = userRol;
+        document.getElementById("user-email").textContent = userEmail;
+        document.getElementById("login-section").style.display = "none";
+        document.getElementById("user-section").style.display = "block";
+
+        if (userRol !== "admin") {
+          alert("Acceso denegado: Solo administradores pueden usar esta interfaz.");
+          document.getElementById("user-section").style.display = "none";
+          document.getElementById("login-section").style.display = "block";
+          userToken = "";
+          return;
+        }
+
+        listarUsuarios();
+      } else {
+        alert("Autenticación fallida: " + returnText);
+      }
+    })
+    .catch(err => alert("Error al validar token: " + err));
+  }
+
+  // Función para decodificar token JWT y extraer email
+  function extractEmailFromToken(token) {
+    try {
+      const base64Url = token.split('.')[1];
+      const base64 = base64Url.replace(/-/g, '+').replace(/_/g, '/');
+      const jsonPayload = decodeURIComponent(atob(base64).split('').map(c =>
+          '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2)).join(''));
+      return JSON.parse(jsonPayload).email || "";
+    } catch {
+      return "";
+    }
+  }
+
+  async function enviarPeticion(xmlBody) {
+    const soapBody = `<?xml version="1.0" encoding="UTF-8"?>
+      <soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/">
+        <soapenv:Body>
+          ${xmlBody}
+        </soapenv:Body>
+      </soapenv:Envelope>`;
+
+    const res = await fetch('http://localhost:9000', {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/xml' },
+      body: soapBody
+    });
+    const text = await res.text();
+    const parser = new DOMParser();
+    const xmlDoc = parser.parseFromString(text, "text/xml");
+    return xmlDoc;
+  }
+
+  async function listarUsuarios() {
+    const xmlBody = `<listar_usuarios><token>${userToken}</token></listar_usuarios>`;
+    const xmlDoc = await enviarPeticion(xmlBody);
+    const usuariosXml = xmlDoc.getElementsByTagName("usuario");
+    const tbody = document.querySelector("#usuariosTable tbody");
+    tbody.innerHTML = "";
+    for (let usuario of usuariosXml) {
+      const correo = usuario.getElementsByTagName("correo")[0].textContent;
+      const nombre = usuario.getElementsByTagName("nombre")[0].textContent;
+      const rol = usuario.getElementsByTagName("rol")[0].textContent;
+
+      const tr = document.createElement("tr");
+      tr.innerHTML = `
+        <td>${correo}</td>
+        <td>${nombre}</td>
+        <td>
+          <select data-correo="${correo}">
+            ${ROLES.map(r => `<option value="${r}" ${r === rol ? "selected" : ""}>${r}</option>`).join('')}
+          </select>
+        </td>
+        <td><button onclick="cambiarRol(this)">Guardar</button></td>
+      `;
+      tbody.appendChild(tr);
+    }
+  }
+
+  async function cambiarRol(btn) {
+    const select = btn.parentNode.parentNode.querySelector("select");
+    const nuevoRol = select.value;
+    const correo = select.getAttribute("data-correo");
+
+    const xmlBody = `<cambiar_rol><token>${userToken}</token><correo>${correo}</correo><rol>${nuevoRol}</rol></cambiar_rol>`;
+    const xmlDoc = await enviarPeticion(xmlBody);
+    alert(xmlDoc.getElementsByTagName("return")[0].textContent);
+    await listarUsuarios();
+  }
+</script>
+
+</body>
+</html>

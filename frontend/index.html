@@ -1,0 +1,543 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <title>Gestión SOA - Admin/Editor</title>
+  <script src="https://accounts.google.com/gsi/client" async defer></script>
+  <style>
+    body { font-family: Arial, sans-serif; padding: 20px; max-width: 900px; margin: auto; }
+    label { display: block; margin-top: 10px; }
+    input, select, textarea { width: 300px; padding: 5px; }
+    .campo, .registro { margin-bottom: 10px; border-bottom: 1px solid #ccc; padding-bottom: 10px; }
+    button { margin-top: 10px; padding: 8px 12px; cursor: pointer; }
+    #resultado, #xmlEnvio { margin-top: 20px; white-space: pre-wrap; border: 1px solid #ccc; padding: 10px; background: #f9f9f9; }
+    #user-section { display: none; }
+    hr { margin-top: 15px; margin-bottom: 15px; }
+  </style>
+</head>
+<body>
+
+<h1>Gestión SOA - Login y Operaciones</h1>
+
+<div>
+  <label for="interfaceSelect">Seleccione la interfaz:</label>
+  <select id="interfaceSelect">
+    <option value="sql">SQL</option>
+    <option value="nosql">NoSQL</option>
+  </select>
+</div>
+
+<div id="login-section">
+  <div id="g_id_onload"
+       data-client_id="1047544597889-tqmj3t57fka16ms7fcjgcii8mseu0cc3.apps.googleusercontent.com"
+       data-callback="handleCredentialResponse"
+       data-auto_prompt="false">
+  </div>
+
+  <div class="g_id_signin"
+       data-type="standard"
+       data-size="large"
+       data-theme="outline"
+       data-text="sign_in_with"
+       data-shape="rectangular"
+       data-logo_alignment="left">
+  </div>
+</div>
+
+<div id="user-section">
+  <p>Bienvenido, <span id="user-email">Usuario</span> | Rol: <span id="user-rol"></span></p>
+
+  <!-- Crear Base -->
+  <div id="crearBaseDiv" style="display:none;">
+    <h2>Crear Base de Datos (Solo admin)</h2>
+    <label>Nombre de la base:
+      <input type="text" id="nombreBase" placeholder="Ejemplo: mi_base" />
+    </label>
+    <button onclick="crearBase()">Crear Base</button>
+    <button onclick="eliminarBase()">Eliminar Base</button>
+  </div>
+
+  <!-- Crear Tabla -->
+  <div id="crearTablaDiv" style="display:none;">
+    <h2>Crear / Eliminar Tabla</h2>
+    <label>Base de datos:
+      <input type="text" id="baseTabla" placeholder="Ejemplo: mi_base" />
+    </label>
+    <label>Nombre de la tabla:
+      <input type="text" id="nombreTabla" placeholder="Ejemplo: usuarios" />
+    </label>
+
+    <h3>Campos (solo para crear tabla)</h3>
+    <div id="campos-container"></div>
+    <button onclick="agregarCampo()">Agregar campo</button><br/>
+    <button onclick="crearTabla()">Crear Tabla</button>
+    <button onclick="eliminarTabla()">Eliminar Tabla</button>
+  </div>
+
+  <!-- Insertar / Modificar / Eliminar Registros -->
+  <div id="insertarRegistrosDiv" style="display:none;">
+    <h2>Insertar / Modificar / Eliminar Registros</h2>
+    <label>Base de datos:
+      <input type="text" id="insertBase" placeholder="Ejemplo: mibase" />
+    </label>
+    <label>Tabla:
+      <input type="text" id="insertTabla" placeholder="Ejemplo: usuarios" />
+    </label>
+
+    <div id="registros-container"></div>
+    <button onclick="agregarRegistro()">Agregar registro</button><br/>
+    <button onclick="insertarRegistros()">Insertar registros</button>
+    <button onclick="modificarRegistros()">Modificar registros</button>
+    <button onclick="eliminarRegistros()">Eliminar registros</button>
+  </div>
+
+  <!-- Listar Bases y Tablas -->
+  <div id="listarDiv" style="display:none;">
+    <h2>Listar Bases y Tablas</h2>
+    <button onclick="listarBases()">Listar Bases de Datos</button>
+    <div id="basesList"></div>
+
+    <div style="margin-top:10px;">
+      <label>Selecciona base para listar tablas:</label>
+      <select id="selectBase" onchange="listarTablas()"></select>
+      <div id="tablasList" style="margin-top:10px;"></div>
+    </div>
+  </div>
+
+  <h3>XML de la petición a enviar</h3>
+  <pre id="xmlEnvio"></pre>
+
+  <h3>Respuesta del servicio</h3>
+  <pre id="resultado"></pre>
+</div>
+
+<script>
+  let userToken = "";
+  let userRol = "";
+  let campos = [];
+  let registros = [];
+
+  // Google OAuth callback
+  function handleCredentialResponse(response) {
+    userToken = response.credential;
+
+    const soapBody = `<?xml version="1.0" encoding="UTF-8"?>
+<soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/">
+  <soapenv:Body>
+    <validar_token>
+      <token>${userToken}</token>
+    </validar_token>
+  </soapenv:Body>
+</soapenv:Envelope>`;
+
+    fetch('http://localhost:9000', {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/xml' },
+      body: soapBody
+    })
+    .then(res => res.text())
+    .then(data => {
+      const parser = new DOMParser();
+      const xmlDoc = parser.parseFromString(data, "text/xml");
+      const returnText = xmlDoc.getElementsByTagName("return")[0].textContent;
+
+      if (returnText.includes("Autenticado")) {
+        userRol = returnText.split("Rol:")[1].trim();
+        document.getElementById("user-rol").textContent = userRol;
+        document.getElementById("login-section").style.display = "none";
+        document.getElementById("user-section").style.display = "block";
+
+        if (userRol === "admin") {
+          document.getElementById("crearBaseDiv").style.display = "block";
+          document.getElementById("crearTablaDiv").style.display = "block";
+          document.getElementById("insertarRegistrosDiv").style.display = "block";
+          document.getElementById("listarDiv").style.display = "block";
+        } else if (userRol === "editor") {
+          document.getElementById("crearBaseDiv").style.display = "none";
+          document.getElementById("crearTablaDiv").style.display = "block";
+          document.getElementById("insertarRegistrosDiv").style.display = "block";
+          document.getElementById("listarDiv").style.display = "block";
+        } else {
+          document.getElementById("crearBaseDiv").style.display = "none";
+          document.getElementById("crearTablaDiv").style.display = "none";
+          document.getElementById("insertarRegistrosDiv").style.display = "none";
+          document.getElementById("listarDiv").style.display = "none";
+        }
+      } else {
+        alert("Autenticación fallida: " + returnText);
+      }
+    })
+    .catch(err => alert("Error al validar token: " + err));
+  }
+
+  // Campos para tabla
+  function agregarCampo() {
+    const container = document.getElementById('campos-container');
+    const index = campos.length;
+    campos.push({ nombre: '', tipo: 'VARCHAR(100)', clave_primaria: false, no_nulo: false });
+
+    const div = document.createElement('div');
+    div.className = 'campo';
+    div.id = 'campo-' + index;
+    div.innerHTML = `
+      <label>Nombre campo:
+        <input type="text" id="nombre-${index}" placeholder="Ejemplo: id" oninput="actualizarCampo(${index}, 'nombre', this.value)" />
+      </label>
+      <label>Tipo:
+        <select id="tipo-${index}" onchange="actualizarCampo(${index}, 'tipo', this.value)">
+          <option value="INT">INT</option>
+          <option value="VARCHAR(100)" selected>VARCHAR(100)</option>
+          <option value="DATE">DATE</option>
+          <option value="FLOAT">FLOAT</option>
+          <option value="BOOLEAN">BOOLEAN</option>
+        </select>
+      </label>
+      <label>
+        <input type="checkbox" id="pk-${index}" onchange="actualizarCampo(${index}, 'clave_primaria', this.checked)" /> Clave primaria
+      </label>
+      <label>
+        <input type="checkbox" id="nn-${index}" onchange="actualizarCampo(${index}, 'no_nulo', this.checked)" /> No nulo
+      </label>
+      <button onclick="eliminarCampo(${index})">Eliminar campo</button>
+    `;
+    container.appendChild(div);
+  }
+  function actualizarCampo(index, propiedad, valor) {
+    campos[index][propiedad] = valor;
+  }
+  function eliminarCampo(index) {
+    campos[index] = null;
+    document.getElementById('campo-' + index).remove();
+  }
+
+  // Crear base
+  function crearBase() {
+    const nombreBase = document.getElementById('nombreBase').value.trim();
+    if (!nombreBase) {
+      alert('Escribe un nombre válido para la base de datos.');
+      return;
+    }
+    const interfaz = document.getElementById("interfaceSelect").value;
+    const soapBody = `<?xml version="1.0" encoding="UTF-8"?>
+<soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/">
+  <soapenv:Body>
+    <crear_base>
+      <token>${userToken}</token>
+      <interfaz>${interfaz}</interfaz>
+      <nombre>${nombreBase}</nombre>
+    </crear_base>
+  </soapenv:Body>
+</soapenv:Envelope>`;
+    mostrarXMLyEnviar(soapBody);
+  }
+  // Eliminar base
+  function eliminarBase() {
+    const nombreBase = document.getElementById('nombreBase').value.trim();
+    if (!nombreBase) {
+      alert('Escribe un nombre válido para la base de datos.');
+      return;
+    }
+    const interfaz = document.getElementById("interfaceSelect").value;
+    const soapBody = `<?xml version="1.0" encoding="UTF-8"?>
+<soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/">
+  <soapenv:Body>
+    <eliminar_base>
+      <token>${userToken}</token>
+      <interfaz>${interfaz}</interfaz>
+      <nombre>${nombreBase}</nombre>
+    </eliminar_base>
+  </soapenv:Body>
+</soapenv:Envelope>`;
+    mostrarXMLyEnviar(soapBody);
+  }
+
+  // Crear tabla
+  function crearTabla() {
+    const base = document.getElementById('baseTabla').value.trim();
+    const tabla = document.getElementById('nombreTabla').value.trim();
+    const camposValidos = campos.filter(c => c !== null && c.nombre.trim() !== '');
+    if (!base || !tabla || camposValidos.length === 0) {
+      alert('Completa el nombre de base, tabla y al menos un campo válido.');
+      return;
+    }
+    const interfaz = document.getElementById("interfaceSelect").value;
+    let camposXML = '';
+    camposValidos.forEach(c => {
+      camposXML += `
+        <campo>
+          <nombre>${c.nombre}</nombre>
+          <tipo>${c.tipo}</tipo>
+          <clave_primaria>${c.clave_primaria}</clave_primaria>
+          <no_nulo>${c.no_nulo}</no_nulo>
+        </campo>`;
+    });
+    const soapBody = `<?xml version="1.0" encoding="UTF-8"?>
+<soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/">
+  <soapenv:Body>
+    <crear_tabla>
+      <token>${userToken}</token>
+      <interfaz>${interfaz}</interfaz>
+      <base>${base}</base>
+      <tabla>${tabla}</tabla>
+      <campos>${camposXML}</campos>
+    </crear_tabla>
+  </soapenv:Body>
+</soapenv:Envelope>`;
+    mostrarXMLyEnviar(soapBody);
+  }
+  // Eliminar tabla
+  function eliminarTabla() {
+    const base = document.getElementById('baseTabla').value.trim();
+    const tabla = document.getElementById('nombreTabla').value.trim();
+    if (!base || !tabla) {
+      alert('Completa nombre de base y tabla para eliminar.');
+      return;
+    }
+    const interfaz = document.getElementById("interfaceSelect").value;
+    const soapBody = `<?xml version="1.0" encoding="UTF-8"?>
+<soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/">
+  <soapenv:Body>
+    <eliminar_tabla>
+      <token>${userToken}</token>
+      <interfaz>${interfaz}</interfaz>
+      <base>${base}</base>
+      <tabla>${tabla}</tabla>
+    </eliminar_tabla>
+  </soapenv:Body>
+</soapenv:Envelope>`;
+    mostrarXMLyEnviar(soapBody);
+  }
+
+  // Agregar registro
+  function agregarRegistro() {
+    const container = document.getElementById('registros-container');
+    const index = registros.length;
+    registros.push({ campos: {} });
+    const div = document.createElement('div');
+    div.className = 'registro';
+    div.id = 'registro-' + index;
+    div.innerHTML = `
+      <h4>Registro ${index + 1}</h4>
+      <label>Campos (formato: nombre=valor, separados por comas):<br>
+        <input type="text" id="campos-${index}" placeholder="Ej: id=1,nombre=Juan,edad=30" style="width:400px;" />
+      </label>
+      <button onclick="eliminarRegistro(${index})">Eliminar registro</button>
+      <hr/>
+    `;
+    container.appendChild(div);
+  }
+  function eliminarRegistro(index) {
+    registros[index] = null;
+    document.getElementById('registro-' + index).remove();
+  }
+  // Insertar registros
+  function insertarRegistros() {
+    const base = document.getElementById('insertBase').value.trim();
+    const tabla = document.getElementById('insertTabla').value.trim();
+    if (!base || !tabla) {
+      alert('Completa base y tabla.');
+      return;
+    }
+    const interfaz = document.getElementById("interfaceSelect").value;
+    let registrosValidos = [];
+    registros.forEach((registro, idx) => {
+      if (registro !== null) {
+        const camposInput = document.getElementById(`campos-${idx}`).value.trim();
+        if (camposInput) {
+          const camposObj = {};
+          camposInput.split(',').forEach(pair => {
+            const [k,v] = pair.split('=');
+            if(k && v) camposObj[k.trim()] = v.trim();
+          });
+          registrosValidos.push(camposObj);
+        }
+      }
+    });
+    if (registrosValidos.length === 0) {
+      alert('Agrega al menos un registro con campos válidos.');
+      return;
+    }
+    let registrosXML = '';
+    registrosValidos.forEach(reg => {
+      registrosXML += `<registro>`;
+      for (const [k,v] of Object.entries(reg)) {
+        registrosXML += `<campo nombre="${k}">${v}</campo>`;
+      }
+      registrosXML += `</registro>`;
+    });
+    const soapBody = `<?xml version="1.0" encoding="UTF-8"?>
+<soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/">
+  <soapenv:Body>
+    <insertar_registro>
+      <token>${userToken}</token>
+      <interfaz>${interfaz}</interfaz>
+      <base>${base}</base>
+      <tabla>${tabla}</tabla>
+      <registros>${registrosXML}</registros>
+    </insertar_registro>
+  </soapenv:Body>
+</soapenv:Envelope>`;
+    mostrarXMLyEnviar(soapBody);
+  }
+  // Modificar registros
+  function modificarRegistros() {
+    const base = document.getElementById('insertBase').value.trim();
+    const tabla = document.getElementById('insertTabla').value.trim();
+    if (!base || !tabla) {
+      alert('Completa base y tabla.');
+      return;
+    }
+    const interfaz = document.getElementById("interfaceSelect").value;
+    // Pedir criterios y nuevos valores en formato nombre=valor
+    const criterioStr = prompt("Ingrese criterios de búsqueda para modificar registros (nombre=valor, separados por comas):");
+    if (!criterioStr) return alert("Criterios necesarios.");
+    const nuevosStr = prompt("Ingrese los nuevos valores para modificar (nombre=valor, separados por comas):");
+    if (!nuevosStr) return alert("Nuevos valores necesarios.");
+    const criterio = {};
+    criterioStr.split(',').forEach(pair => {
+      const [k,v] = pair.split('=');
+      if(k && v) criterio[k.trim()] = v.trim();
+    });
+    const nuevos_valores = {};
+    nuevosStr.split(',').forEach(pair => {
+      const [k,v] = pair.split('=');
+      if(k && v) nuevos_valores[k.trim()] = v.trim();
+    });
+    let criterioXML = '';
+    for (const [k,v] of Object.entries(criterio)) {
+      criterioXML += `<campo nombre="${k}">${v}</campo>`;
+    }
+    let nuevosXML = '';
+    for (const [k,v] of Object.entries(nuevos_valores)) {
+      nuevosXML += `<campo nombre="${k}">${v}</campo>`;
+    }
+    const soapBody = `<?xml version="1.0" encoding="UTF-8"?>
+<soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/">
+  <soapenv:Body>
+    <modificar_registro>
+      <token>${userToken}</token>
+      <interfaz>${interfaz}</interfaz>
+      <base>${base}</base>
+      <tabla>${tabla}</tabla>
+      <criterio>${criterioXML}</criterio>
+      <nuevos_valores>${nuevosXML}</nuevos_valores>
+    </modificar_registro>
+  </soapenv:Body>
+</soapenv:Envelope>`;
+    mostrarXMLyEnviar(soapBody);
+  }
+  // Eliminar registros
+  function eliminarRegistros() {
+    const base = document.getElementById('insertBase').value.trim();
+    const tabla = document.getElementById('insertTabla').value.trim();
+    if (!base || !tabla) {
+      alert('Completa base y tabla.');
+      return;
+    }
+    const interfaz = document.getElementById("interfaceSelect").value;
+    const criterioStr = prompt("Ingrese criterios de búsqueda para eliminar registros (nombre=valor, separados por comas):");
+    if (!criterioStr) return alert("Criterios necesarios.");
+    const criterio = {};
+    criterioStr.split(',').forEach(pair => {
+      const [k,v] = pair.split('=');
+      if(k && v) criterio[k.trim()] = v.trim();
+    });
+    let criterioXML = '';
+    for (const [k,v] of Object.entries(criterio)) {
+      criterioXML += `<campo nombre="${k}">${v}</campo>`;
+    }
+    const soapBody = `<?xml version="1.0" encoding="UTF-8"?>
+<soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/">
+  <soapenv:Body>
+    <eliminar_registro>
+      <token>${userToken}</token>
+      <interfaz>${interfaz}</interfaz>
+      <base>${base}</base>
+      <tabla>${tabla}</tabla>
+      <criterio>${criterioXML}</criterio>
+    </eliminar_registro>
+  </soapenv:Body>
+</soapenv:Envelope>`;
+    mostrarXMLyEnviar(soapBody);
+  }
+
+  // Listar bases
+  function listarBases() {
+    const interfaz = document.getElementById("interfaceSelect").value;
+    const soapBody = `<?xml version="1.0" encoding="UTF-8"?>
+<soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/">
+  <soapenv:Body>
+    <listar_bases>
+      <token>${userToken}</token>
+      <interfaz>${interfaz}</interfaz>
+    </listar_bases>
+  </soapenv:Body>
+</soapenv:Envelope>`;
+    mostrarXMLyEnviar(soapBody);
+  }
+
+  // Listar tablas
+  function listarTablas() {
+    const base = document.getElementById("selectBase").value;
+    if (!base) return;
+    const interfaz = document.getElementById("interfaceSelect").value;
+    const soapBody = `<?xml version="1.0" encoding="UTF-8"?>
+<soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/">
+  <soapenv:Body>
+    <listar_tablas>
+      <token>${userToken}</token>
+      <interfaz>${interfaz}</interfaz>
+      <base>${base}</base>
+    </listar_tablas>
+  </soapenv:Body>
+</soapenv:Envelope>`;
+    mostrarXMLyEnviar(soapBody);
+  }
+
+  // Función para mostrar XML enviado y enviar petición
+  function mostrarXMLyEnviar(xml) {
+    document.getElementById('xmlEnvio').textContent = xml;
+    fetch('http://localhost:9000', {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/xml' },
+      body: xml
+    })
+    .then(res => res.text())
+    .then(data => {
+      document.getElementById('resultado').textContent = data;
+
+      const parser = new DOMParser();
+      const xmlDoc = parser.parseFromString(data, "text/xml");
+
+      // Actualizar bases list
+      const bases = xmlDoc.getElementsByTagName("base");
+      if (bases.length > 0) {
+        const basesListDiv = document.getElementById("basesList");
+        const selectBase = document.getElementById("selectBase");
+        basesListDiv.textContent = Array.from(bases).map(el => el.textContent).join(", ");
+        selectBase.innerHTML = "";
+        Array.from(bases).forEach(base => {
+          const opt = document.createElement("option");
+          opt.value = base.textContent;
+          opt.textContent = base.textContent;
+          selectBase.appendChild(opt);
+        });
+      }
+
+      // Actualizar tablas list
+      const tablas = xmlDoc.getElementsByTagName("tabla");
+      if (tablas.length > 0) {
+        document.getElementById("tablasList").textContent = Array.from(tablas).map(el => el.textContent).join(", ");
+      }
+
+    })
+    .catch(err => alert('Error: ' + err));
+  }
+
+  // Inicialización
+  agregarCampo();
+  agregarRegistro();
+</script>
+
+</body>
+</html>
