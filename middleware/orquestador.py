@@ -1,4 +1,4 @@
-from flask import Flask, request, Response
+from flask import Flask, request, Response, send_file
 from flask_cors import CORS
 import pika
 import uuid
@@ -11,19 +11,25 @@ CORS(app)
 PERMISOS = {
     "validar_token": ["admin", "editor", "lector"],
     "crear_base": ["admin"],
-    "eliminar_base": ["admin"],                # Nueva operación
+    "eliminar_base": ["admin"],
     "crear_tabla": ["admin", "editor"],
-    "eliminar_tabla": ["admin", "editor"],    # Nueva operación
+    "eliminar_tabla": ["admin", "editor"],
     "insertar_registro": ["admin", "editor"],
-    "modificar_registro": ["admin", "editor"],# Nueva operación
-    "eliminar_registro": ["admin", "editor"], # Nueva operación
+    "modificar_registro": ["admin", "editor"],
+    "eliminar_registro": ["admin", "editor"],
     "listar_bases": ["admin", "editor", "lector"],
     "listar_tablas": ["admin", "editor", "lector"],
     "consultar": ["admin", "editor", "lector"],
     "listar_usuarios": ["admin", "editor"],
     "cambiar_rol": ["admin"],
-    "listAll": ["admin", "editor", "lector"]
+    "consulta_avanzada": ["admin", "editor", "lector"],
+    "listall": ["admin", "editor", "lector"]
 }
+
+@app.route('/wsdl', methods=['GET'])
+def wsdl():
+    # Cambia esta ruta al lugar donde tengas guardado el archivo wsdl
+    return send_file(r'C:\Users\alfre\OneDrive\Escritorio\9no Semestre\Servicios Web\ProyectoSoa\wsdl\KioskCloudService.wsdl', mimetype='text/xml')
 
 def enviar_y_esperar_respuesta(queue_name, mensaje):
     connection = pika.BlockingConnection(pika.ConnectionParameters('localhost'))
@@ -66,13 +72,30 @@ def enviar_y_esperar_respuesta(queue_name, mensaje):
 def recibir_peticion():
     try:
         xml = request.data
+        xml_str = xml.decode('utf-8')
+        print(f"[ORQUESTADOR] XML recibido:\n{xml_str}\n")
         tree = etree.fromstring(xml)
-        body = tree.xpath('//soap:Body', namespaces={'soap': 'http://schemas.xmlsoap.org/soap/envelope/'})[0]
+        body = tree.xpath('//soap:Body', namespaces={'soap': 'http://schemas.xmlsoap.org/soap/envelope/'})
+        if not body:
+            return generar_respuesta_soap("Error: No se encontró el Body en el mensaje SOAP")
+        body_elem = body[0]
 
-        operacion = etree.QName(body[0]).localname
-        print(f"[ORQUESTADOR] Operación recibida: {operacion}")
-        token = body[0].findtext('token')
-        interfaz = body[0].findtext('interfaz') or "sql"
+        if body_elem is None or len(body_elem) == 0:
+            return generar_respuesta_soap("Error: No se encontró operación dentro del Body")
+
+        print("[ORQUESTADOR] Contenido de body_elem:\n", etree.tostring(body_elem, pretty_print=True).decode())
+
+        operacion_elem = body_elem[0]
+        operacion = operacion_elem.tag
+        if '}' in operacion:
+            operacion = operacion.split('}', 1)[1]
+        operacion = operacion.lower()
+
+        print(f"[ORQUESTADOR] Operacion detectada: '{operacion}'")
+
+        token = operacion_elem.findtext('token')
+        interfaz = operacion_elem.findtext('interfaz') or "sql"
+        interfaz = interfaz.lower()
 
         print(f"[ORQUESTADOR] Interfaz seleccionada: {interfaz}")
         print(f"[ORQUESTADOR] Validando token para operación: {operacion}")
@@ -83,12 +106,12 @@ def recibir_peticion():
         if respuesta_auth is None or not isinstance(respuesta_auth, str):
             return generar_respuesta_soap("Error: No se recibió una respuesta válida del servicio de autenticación.")
 
-        if "Autenticado" not in respuesta_auth:
+        if "autenticado" not in respuesta_auth.lower():
             return generar_respuesta_soap(respuesta_auth)
 
         rol = None
-        if "Rol:" in respuesta_auth:
-            rol = respuesta_auth.split("Rol:")[1].strip()
+        if "rol:" in respuesta_auth.lower():
+            rol = respuesta_auth.lower().split("rol:")[1].strip()
         else:
             return generar_respuesta_soap("No se pudo determinar el rol del usuario.")
 
@@ -101,18 +124,15 @@ def recibir_peticion():
         if operacion == "validar_token":
             return generar_respuesta_soap(respuesta_auth)
 
-        if operacion == "listAll":
+        if operacion == "listall":
             return generar_respuesta_soap(listar_operaciones())
 
-        mensaje = etree.tostring(body[0], encoding='unicode')
+        mensaje = etree.tostring(operacion_elem, encoding='unicode')
 
         if operacion in ["listar_usuarios", "cambiar_rol"]:
             queue = "servicio_roles"
         else:
-            if interfaz == "nosql":
-                queue = "servicio_nosql"
-            else:
-                queue = "servicio_crud"
+            queue = "servicio_nosql" if interfaz == "nosql" else "servicio_crud"
 
         print(f"[ORQUESTADOR] Enrutando operación '{operacion}' a cola '{queue}'")
 
@@ -120,6 +140,7 @@ def recibir_peticion():
         return generar_respuesta_soap(respuesta_servicio)
 
     except Exception as e:
+        print(f"[ORQUESTADOR] ERROR: {str(e)}")
         return generar_respuesta_soap(f"Error en el orquestador: {str(e)}")
 
 def generar_respuesta_soap(mensaje):
@@ -127,7 +148,7 @@ def generar_respuesta_soap(mensaje):
     <soap:Envelope xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/">
       <soap:Body>
         <orquestadorResponse>
-          <return>{mensaje}</return>
+          <resultado>{mensaje}</resultado>
         </orquestadorResponse>
       </soap:Body>
     </soap:Envelope>""", mimetype="text/xml")
@@ -147,7 +168,8 @@ def listar_operaciones():
         "consultar": "Consultar datos (todos los roles)",
         "listar_usuarios": "Listar usuarios (admin, editor)",
         "cambiar_rol": "Cambiar rol usuario (solo admin)",
-        "listAll": "Listar operaciones disponibles"
+        "consulta_avanzada": "Ejecutar consultas avanzadas SQL y NoSQL",
+        "listall": "Listar operaciones disponibles"
     }
     return json.dumps(operaciones, indent=2, ensure_ascii=False)
 

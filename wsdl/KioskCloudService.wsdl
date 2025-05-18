@@ -1,0 +1,228 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<definitions
+    name="KioskCloudService"
+    targetNamespace="http://kioskcloud.example.com/wsdl"
+    xmlns:tns="http://kioskcloud.example.com/wsdl"
+    xmlns:soap="http://schemas.xmlsoap.org/wsdl/soap/"
+    xmlns:xsd="http://www.w3.org/2001/XMLSchema"
+    xmlns:wsdl="http://schemas.xmlsoap.org/wsdl/"
+    xmlns="http://schemas.xmlsoap.org/wsdl/">
+
+  <types>
+    <xsd:schema
+      targetNamespace="http://kioskcloud.example.com/wsdl"
+      xmlns:tns="http://kioskcloud.example.com/wsdl"
+      xmlns:xsd="http://www.w3.org/2001/XMLSchema"
+      elementFormDefault="qualified">
+
+      <!-- Token común para autenticación -->
+      <xsd:complexType name="tokenRequest">
+        <xsd:sequence>
+          <xsd:element name="token" type="xsd:string"/>
+        </xsd:sequence>
+      </xsd:complexType>
+
+      <!-- Autenticación -->
+      <xsd:complexType name="validarTokenRequest">
+        <xsd:sequence>
+          <xsd:element name="token" type="xsd:string"/>
+        </xsd:sequence>
+      </xsd:complexType>
+
+      <xsd:complexType name="validarTokenResponse">
+        <xsd:sequence>
+          <xsd:element name="resultado" type="xsd:string"/>
+        </xsd:sequence>
+      </xsd:complexType>
+
+      <!-- Crear Base -->
+      <xsd:complexType name="crearBaseRequest">
+        <xsd:sequence>
+          <xsd:element name="token" type="xsd:string"/>
+          <xsd:element name="nombre" type="xsd:string"/>
+        </xsd:sequence>
+      </xsd:complexType>
+
+      <xsd:complexType name="crearBaseResponse">
+        <xsd:sequence>
+          <xsd:element name="resultado" type="xsd:string"/>
+        </xsd:sequence>
+      </xsd:complexType>
+
+      <!-- Eliminar Base -->
+      <xsd:complexType name="eliminarBaseRequest">
+        <xsd:sequence>
+          <xsd:element name="token" type="xsd:string"/>
+          <xsd:element name="nombre" type="xsd:string"/>
+        </xsd:sequence>
+      </xsd:complexType>
+
+      <xsd:complexType name="eliminarBaseResponse">
+        <xsd:sequence>
+          <xsd:element name="resultado" type="xsd:string"/>
+        </xsd:sequence>
+      </xsd:complexType>
+
+      <!-- Listar Bases -->
+      <xsd:complexType name="listarBasesRequest">
+        <xsd:sequence>
+          <xsd:element name="token" type="xsd:string"/>
+          <xsd:element name="interfaz" type="xsd:string"/>
+        </xsd:sequence>
+      </xsd:complexType>
+
+      <xsd:complexType name="listarBasesResponse">
+        <xsd:sequence>
+          <xsd:element name="resultado" type="xsd:string"/>
+        </xsd:sequence>
+      </xsd:complexType>
+
+      <!-- Listar Tablas -->
+      <xsd:complexType name="listarTablasRequest">
+        <xsd:sequence>
+          <xsd:element name="token" type="xsd:string"/>
+          <xsd:element name="interfaz" type="xsd:string"/>
+          <xsd:element name="base" type="xsd:string"/>
+        </xsd:sequence>
+      </xsd:complexType>
+
+      <xsd:complexType name="listarTablasResponse">
+        <xsd:sequence>
+          <xsd:element name="resultado" type="xsd:string"/>
+        </xsd:sequence>
+      </xsd:complexType>
+
+      <!-- Consulta Avanzada -->
+      <xsd:complexType name="consultaAvanzadaRequest">
+        <xsd:sequence>
+          <xsd:element name="token" type="xsd:string"/>
+          <xsd:element name="interfaz" type="xsd:string"/>
+          <xsd:element name="base" type="xsd:string"/>
+          <xsd:element name="tablas" type="xsd:string"/>
+          <xsd:element name="campos" type="xsd:string"/>
+          <xsd:element name="relaciones" type="xsd:string" minOccurs="0"/>
+          <xsd:element name="filtros" type="xsd:string" minOccurs="0"/>
+          <xsd:element name="agrupaciones" type="xsd:string" minOccurs="0"/>
+          <xsd:element name="ordenamientos" type="xsd:string" minOccurs="0"/>
+          <xsd:element name="limite" type="xsd:int"/>
+        </xsd:sequence>
+      </xsd:complexType>
+
+      <xsd:complexType name="consultaAvanzadaResponse">
+        <xsd:sequence>
+          <xsd:element name="resultado" type="xsd:string"/>
+        </xsd:sequence>
+      </xsd:complexType>
+
+    </xsd:schema>
+  </types>
+
+  <message name="ValidarTokenRequest">
+    <part name="parameters" type="tns:validarTokenRequest"/>
+  </message>
+  <message name="ValidarTokenResponse">
+    <part name="parameters" type="tns:validarTokenResponse"/>
+  </message>
+
+  <message name="CrearBaseRequest">
+    <part name="parameters" type="tns:crearBaseRequest"/>
+  </message>
+  <message name="CrearBaseResponse">
+    <part name="parameters" type="tns:crearBaseResponse"/>
+  </message>
+
+  <message name="EliminarBaseRequest">
+    <part name="parameters" type="tns:eliminarBaseRequest"/>
+  </message>
+  <message name="EliminarBaseResponse">
+    <part name="parameters" type="tns:eliminarBaseResponse"/>
+  </message>
+
+  <message name="ListarBasesRequest">
+    <part name="parameters" type="tns:listarBasesRequest"/>
+  </message>
+  <message name="ListarBasesResponse">
+    <part name="parameters" type="tns:listarBasesResponse"/>
+  </message>
+
+  <message name="ListarTablasRequest">
+    <part name="parameters" type="tns:listarTablasRequest"/>
+  </message>
+  <message name="ListarTablasResponse">
+    <part name="parameters" type="tns:listarTablasResponse"/>
+  </message>
+
+  <message name="ConsultaAvanzadaRequest">
+    <part name="parameters" type="tns:consultaAvanzadaRequest"/>
+  </message>
+  <message name="ConsultaAvanzadaResponse">
+    <part name="parameters" type="tns:consultaAvanzadaResponse"/>
+  </message>
+
+  <portType name="KioskCloudPortType">
+    <operation name="ValidarToken">
+      <input message="tns:ValidarTokenRequest"/>
+      <output message="tns:ValidarTokenResponse"/>
+    </operation>
+    <operation name="CrearBase">
+      <input message="tns:CrearBaseRequest"/>
+      <output message="tns:CrearBaseResponse"/>
+    </operation>
+    <operation name="EliminarBase">
+      <input message="tns:EliminarBaseRequest"/>
+      <output message="tns:EliminarBaseResponse"/>
+    </operation>
+    <operation name="ListarBases">
+      <input message="tns:ListarBasesRequest"/>
+      <output message="tns:ListarBasesResponse"/>
+    </operation>
+    <operation name="ListarTablas">
+      <input message="tns:ListarTablasRequest"/>
+      <output message="tns:ListarTablasResponse"/>
+    </operation>
+    <operation name="ConsultaAvanzada">
+      <input message="tns:ConsultaAvanzadaRequest"/>
+      <output message="tns:ConsultaAvanzadaResponse"/>
+    </operation>
+  </portType>
+
+  <binding name="KioskCloudBinding" type="tns:KioskCloudPortType">
+    <soap:binding style="document" transport="http://schemas.xmlsoap.org/soap/http"/>
+    <operation name="ValidarToken">
+      <soap:operation soapAction="ValidarToken"/>
+      <input><soap:body use="literal"/></input>
+      <output><soap:body use="literal"/></output>
+    </operation>
+    <operation name="CrearBase">
+      <soap:operation soapAction="CrearBase"/>
+      <input><soap:body use="literal"/></input>
+      <output><soap:body use="literal"/></output>
+    </operation>
+    <operation name="EliminarBase">
+      <soap:operation soapAction="EliminarBase"/>
+      <input><soap:body use="literal"/></input>
+      <output><soap:body use="literal"/></output>
+    </operation>
+    <operation name="ListarBases">
+      <soap:operation soapAction="ListarBases"/>
+      <input><soap:body use="literal"/></input>
+      <output><soap:body use="literal"/></output>
+    </operation>
+    <operation name="ListarTablas">
+      <soap:operation soapAction="ListarTablas"/>
+      <input><soap:body use="literal"/></input>
+      <output><soap:body use="literal"/></output>
+    </operation>
+    <operation name="ConsultaAvanzada">
+      <soap:operation soapAction="ConsultaAvanzada"/>
+      <input><soap:body use="literal"/></input>
+      <output><soap:body use="literal"/></output>
+    </operation>
+  </binding>
+
+  <service name="KioskCloudService">
+    <port name="KioskCloudPort" binding="tns:KioskCloudBinding">
+      <soap:address location="http://localhost:9000/"/>
+    </port>
+  </service>
+</definitions>

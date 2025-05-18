@@ -139,32 +139,43 @@
     .then(data => {
       const parser = new DOMParser();
       const xmlDoc = parser.parseFromString(data, "text/xml");
-      const returnText = xmlDoc.getElementsByTagName("return")[0].textContent;
-
-      if (returnText.includes("Autenticado")) {
-        userRol = returnText.split("Rol:")[1].trim();
-        document.getElementById("user-rol").textContent = userRol;
-        document.getElementById("login-section").style.display = "none";
-        document.getElementById("user-section").style.display = "block";
-
-        if (userRol === "admin") {
-          document.getElementById("crearBaseDiv").style.display = "block";
-          document.getElementById("crearTablaDiv").style.display = "block";
-          document.getElementById("insertarRegistrosDiv").style.display = "block";
-          document.getElementById("listarDiv").style.display = "block";
-        } else if (userRol === "editor") {
-          document.getElementById("crearBaseDiv").style.display = "none";
-          document.getElementById("crearTablaDiv").style.display = "block";
-          document.getElementById("insertarRegistrosDiv").style.display = "block";
-          document.getElementById("listarDiv").style.display = "block";
-        } else {
-          document.getElementById("crearBaseDiv").style.display = "none";
-          document.getElementById("crearTablaDiv").style.display = "none";
-          document.getElementById("insertarRegistrosDiv").style.display = "none";
-          document.getElementById("listarDiv").style.display = "none";
-        }
+      const resultados = xmlDoc.getElementsByTagName("resultado");
+      let returnText = "";
+      if (resultados.length > 0) {
+        returnText = resultados[0].textContent;
       } else {
-        alert("Autenticación fallida: " + returnText);
+        alert("No se encontró el nodo <resultado> en la respuesta del servidor.");
+        return;
+      }
+
+      const textoLower = returnText.toLowerCase();
+      const rolIndex = textoLower.indexOf("rol:");
+      if (rolIndex !== -1) {
+        userRol = returnText.substring(rolIndex + 4).trim();
+      } else {
+        alert("No se pudo encontrar el rol en la respuesta.");
+        return;
+      }
+
+      document.getElementById("user-rol").textContent = userRol;
+      document.getElementById("login-section").style.display = "none";
+      document.getElementById("user-section").style.display = "block";
+
+      if (userRol === "admin") {
+        document.getElementById("crearBaseDiv").style.display = "block";
+        document.getElementById("crearTablaDiv").style.display = "block";
+        document.getElementById("insertarRegistrosDiv").style.display = "block";
+        document.getElementById("listarDiv").style.display = "block";
+      } else if (userRol === "editor") {
+        document.getElementById("crearBaseDiv").style.display = "none";
+        document.getElementById("crearTablaDiv").style.display = "block";
+        document.getElementById("insertarRegistrosDiv").style.display = "block";
+        document.getElementById("listarDiv").style.display = "block";
+      } else {
+        document.getElementById("crearBaseDiv").style.display = "none";
+        document.getElementById("crearTablaDiv").style.display = "none";
+        document.getElementById("insertarRegistrosDiv").style.display = "none";
+        document.getElementById("listarDiv").style.display = "none";
       }
     })
     .catch(err => alert("Error al validar token: " + err));
@@ -538,6 +549,8 @@
   agregarCampo();
   agregarRegistro();
 </script>
+
+<button onclick="window.open('consultas_avanzadas.html', '_blank')">Abrir Consultas Avanzadas</button>
 
 </body>
 </html>
